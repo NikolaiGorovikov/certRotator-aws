@@ -1,0 +1,19 @@
+{
+  "name": "certrotator",
+  "version": "1.0.0",
+  "description": "Rotates your certificates with vault in AWS env",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NikolaiGorovikov/certRotator-aws.git"
+  },
+  "author": "Nikolai Gorovikov",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/NikolaiGorovikov/certRotator-aws/issues"
+  },
+  "homepage": "https://github.com/NikolaiGorovikov/certRotator-aws#readme"
+}

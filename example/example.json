@@ -1,0 +1,38 @@
+{
+  "type": "vault/s3",
+  "vault": {
+    "pki_role": "The role you specify in PKI, not the one you use to log in to vault",
+    "vault_role": "The role under which you log in to vault",
+    "pki_path": "The pki path you are using",
+    "version": "not mandatory, defaults to v1",
+    "address": "vault.domain.com:8200"
+  },
+  "s3": {
+    "bucket": "campusmarket-bucket",
+    "file": "path/to/file.txt"
+  },
+  "cert": {
+    "ttl": "some ttl",
+    "common_name": "...",
+    "ip_sans": "...",
+    "alt_names": "...",
+    "format": "pem?"
+  },
+  "tls": {
+    "ca": "If needed, specify the CA file to be trusted (Vault's CA)",
+    "cert": "This one will write the cert file there, and also use it to talk to vault",
+    "key": "Will write the key there and use it to talk to vault"
+  },
+  "onreplace": [
+    "command 1", "command 2", "systemctl restart nginx"
+  ],
+  "onstart": [
+    "systemctl start nginx"
+  ],
+  "intervals": {
+    "ok": 0.2,
+    "error": 0.05,
+    "default": 30000,
+    "buffer": 0.25
+  }
+}
