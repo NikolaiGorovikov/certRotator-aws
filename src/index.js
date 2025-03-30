@@ -17,6 +17,8 @@ function main() {
             process.exit(1);
         }
 
+        logger.info("The config is legit.");
+
         const tls = config.tls;
         aws.setTLS(tls);
 

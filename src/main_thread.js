@@ -1,5 +1,5 @@
 const aws = require("aws-ahh-sdk");
-const { spawn } = require('child_process');
+const { spawn } = require("child_process");
 const logger = require("./logger");
 const fs = require("fs");
 
@@ -11,19 +11,79 @@ const fs = require("fs");
  */
 async function runCommand(fullCommand) {
     return new Promise((resolve, reject) => {
-        const child = spawn(fullCommand, { shell: true, stdio: 'inherit' });
+        const child = spawn(fullCommand, { shell: true, stdio: "inherit" });
 
-        child.on('error', (err) => {
+        child.on("error", (err) => {
             reject(new Error(`Failed to start command: ${err.message}`));
         });
 
-        child.on('close', (code) => {
+        child.on("close", (code) => {
             if (code === 0) {
                 resolve();
             } else {
                 reject(new Error(`Command exited with code ${code}`));
             }
         });
+    });
+}
+
+/**
+ * Runs multiple commands in parallel. Each command has its own retry logic.
+ * The function returns once ALL commands have succeeded OR at least one command fails all retries.
+ *
+ * @param {Array<{command: string, description?: string, onfail: {retry_every: number, retry_num: number}}>} hookArray
+ * @param {string} hookName - Either "onstart" or "onreplace" (for logging).
+ */
+function runHookCommands(hookArray, hookName) {
+    if (!Array.isArray(hookArray) || hookArray.length === 0) {
+        logger.info(`No '${hookName}' commands to run.`);
+        return Promise.resolve();
+    }
+
+    // Each command runs in parallel, each can succeed or keep retrying until success or attempts exhausted.
+    // We gather the results with Promise.all().
+    const promises = hookArray.map((hook, index) => {
+        return new Promise((resolve, reject) => {
+            let attempts = 0;
+            const maxAttempts = hook.onfail.retry_num;
+            const interval = hook.onfail.retry_every;
+            let completed = false;
+
+            async function attempt() {
+                if (completed) return; // just in case
+
+                attempts++;
+                if (hook.description) {
+                    logger.info(`(${hookName}[${index}]) ${hook.description}`);
+                }
+                logger.info(`Attempting command [${hook.command}] (attempt #${attempts})...`);
+
+                try {
+                    await runCommand(hook.command);
+                    logger.info(`Command succeeded [${hook.command}]`);
+                    completed = true;
+                    resolve(); // done for this command
+                } catch (err) {
+                    logger.error(`Command failed [${hook.command}]: ${err.message}`);
+                    if (attempts >= maxAttempts) {
+                        // Exhausted all attempts => hard failure
+                        return reject(new Error(
+                            `Command [${hook.command}] failed after ${attempts} attempts.`
+                        ));
+                    }
+                    // Otherwise, schedule next attempt
+                    setTimeout(() => attempt(), interval);
+                }
+            }
+
+            // First attempt
+            attempt();
+        });
+    });
+
+    // The runHookCommands only resolves when ALL commands are done or one is exhausted
+    return Promise.all(promises).then(() => {
+        logger.info(`All '${hookName}' commands completed successfully.`);
     });
 }
 
@@ -43,7 +103,7 @@ async function fetchCertificate(config) {
 }
 
 /**
- * Writes the certificate and private key to a file.
+ * Writes the certificate and private key to a file (the same file for both, per config).
  * @param {object} certData - The certificate data object.
  * @param {object} config - The configuration object (for file paths).
  */
@@ -51,30 +111,6 @@ function writeCertificateToFile(certData, config) {
     logger.info(`Writing certificate to file: ${config.tls.cert}`);
     fs.writeFileSync(config.tls.cert, certData.certificate + "\n" + certData.private_key);
     logger.info("File write successful!");
-}
-
-/**
- * Runs a list of commands sequentially.
- * If any command fails, it throws an error.
- * @param {string[]} commands - Array of shell commands to run.
- * @param {string} errorMessage - Custom error message used in logs.
- */
-async function runCommandsSafely(commands, errorMessage) {
-    if (!commands || commands.length === 0) {
-        logger.info("No commands to run.");
-        return;
-    }
-    logger.info(`Running ${commands.length} command(s)...`);
-    for (let command of commands) {
-        try {
-            await runCommand(command);
-            logger.info(`Command "${command}" ran successfully.`);
-        } catch (error) {
-            logger.error(`${errorMessage}\n  -> Failed command: "${command}"\n  -> ${error.message}`);
-            throw error;
-        }
-    }
-    logger.info("All commands executed successfully.");
 }
 
 /**
@@ -97,15 +133,15 @@ async function main(current, config) {
     logger.info(`Entering main function with status: "${current.status}"`);
 
     switch (current.status) {
-        case 'start':
+        case "start":
             await handleStart(current, config);
             break;
 
-        case 'ok':
+        case "ok":
             await handleOk(current, config);
             break;
 
-        case 'error':
+        case "error":
             await handleError(current, config);
             break;
 
@@ -146,12 +182,13 @@ async function handleStart(current, config) {
         return scheduleNextStatusTransition(retryTime, current, config);
     }
 
-    // Run onstart commands
+    // Run onstart commands with the new concurrency+retry logic
     try {
-        logger.info("Running 'onstart' commands...");
-        await runCommandsSafely(config.onstart, "Fatal error running 'onstart' commands.");
+        logger.info("Running 'onstart' commands (with retry logic)...");
+        await runHookCommands(config.onstart, "onstart");
     } catch (e) {
-        // Fatal error, cannot proceed
+        // If we fail all attempts for any command, we consider it a fatal error
+        logger.error(`Fatal error in 'onstart' commands: ${e.message}`);
         throw e;
     }
 
@@ -210,10 +247,12 @@ async function handleOk(current, config) {
             return scheduleNextStatusTransition(retryTime, current, config);
         }
 
-        // Run onreplace commands
+        // Run onreplace commands with concurrency+retry logic
         try {
-            await runCommandsSafely(config.onreplace, "Fatal error running 'onreplace' commands.");
+            logger.info("Running 'onreplace' commands (with retry logic)...");
+            await runHookCommands(config.onreplace, "onreplace");
         } catch (e) {
+            logger.error(`Fatal error in 'onreplace' commands: ${e.message}`);
             throw e;
         }
     }
@@ -241,11 +280,10 @@ async function handleOk(current, config) {
 async function handleError(current, config) {
     logger.info("Status is 'error'. Attempting to recover and obtain a new certificate...");
 
-    // <-- Likely bug is here: check if the certificate is actually expired
-    // If expiration is in seconds, compare (expiration * 1000) to Date.now()
+    // If the active certificate is already expired, we have no fallback
     if (current.active_cert.expiration * 1000 < Date.now()) {
         logger.error("The active certificate has expired. Cannot proceed.");
-        throw new Error('Last certificate has expired, aborting.');
+        throw new Error("Last certificate has expired, aborting.");
     }
 
     const retryTime = current.active_cert.ttl * config.intervals.error;
@@ -274,7 +312,8 @@ async function handleError(current, config) {
 
             // Run onreplace commands
             try {
-                await runCommandsSafely(config.onreplace, "Fatal error running 'onreplace' commands.");
+                logger.info("Running 'onreplace' commands (with retry logic)...");
+                await runHookCommands(config.onreplace, "onreplace");
             } catch (cmdErr) {
                 throw cmdErr;
             }
@@ -284,7 +323,6 @@ async function handleError(current, config) {
         return scheduleNextStatusTransition(retryTime, current, config);
     }
 
-    // If we succeed in obtaining the certificate
     current.second_cert = certData;
 
     // Check if the active certificate is close to expiration
@@ -300,13 +338,16 @@ async function handleError(current, config) {
         } catch (e) {
             logger.error("Failed to write new certificate to file. Check permissions.");
             logger.info(`Retrying in ${Math.round(retryTime / 1000)} seconds.`);
+            current.status = "error";
             return scheduleNextStatusTransition(retryTime, current, config);
         }
 
-        // Run onreplace commands
+        // Run onreplace commands with concurrency+retry logic
         try {
-            await runCommandsSafely(config.onreplace, "Fatal error running 'onreplace' commands.");
+            logger.info("Running 'onreplace' commands (with retry logic)...");
+            await runHookCommands(config.onreplace, "onreplace");
         } catch (e) {
+            logger.error(`Fatal error in 'onreplace' commands: ${e.message}`);
             throw e;
         }
     }
