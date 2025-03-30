@@ -20,7 +20,7 @@ function validateConfig(config) {
     //
     const requiredTopLevelFields = ["vault", "cert", "tls", "onreplace", "onstart", "intervals"];
     requiredTopLevelFields.forEach((field) => {
-        if (!config.hasOwnProperty(field)) {
+        if (!Object.prototype.hasOwnProperty.call(config, field)) {
             throw new Error(`Missing mandatory top-level field '${field}'.`);
         }
     });
@@ -37,7 +37,7 @@ function validateConfig(config) {
     }
 
     // version (optional but if present, must be "v1")
-    if (vault.hasOwnProperty("version") && vault.version !== "v1") {
+    if (Object.prototype.hasOwnProperty.call(vault, "version") && vault.version !== "v1") {
         throw new Error("If 'vault.version' is provided, it must be 'v1'.");
     }
 
@@ -77,19 +77,12 @@ function validateConfig(config) {
     //
     // 4) cert object checks
     //    This can be empty, but it must be an object.
-    //    You may decide if you want to enforce "common_name"
-    //    based on your comment that it "can perhaps be even empty"
     //
     const { cert } = config;
     if (typeof cert !== "object" || cert === null) {
         throw new Error("'cert' must be an object (it can be empty, but not null).");
     }
-    // Example: if you want to ensure it's not empty, you can do:
-    // if (Object.keys(cert).length === 0) {
-    //   // The spec says "perhaps be even empty, but in this case log a warning."
-    //   // We'll not throw an Error, but if you want, you could do:
-    //   // throw new Error("'cert' is empty. Provide at least TTL or common_name.");
-    // }
+    // If you want to enforce at least one property in cert, you could do it here.
 
     //
     // 5) tls object checks
@@ -125,9 +118,8 @@ function validateConfig(config) {
     //    Each object must have 'command' (string).
     //    'description' is optional.
     //    'onfail' is optional and can be "true" or an object.
-    //        If an object, it can contain 'retry_every' (in the range 1000-1800000)
+    //        If an object, it can contain 'retry_every' (number in range 1000-1800000)
     //        and 'retry_num' (1-1000).
-    //        If 'retry_every' is e.g. "milliseconds, 60000", we parse the second part.
     //
     function validateHookArray(hookName) {
         const arr = config[hookName];
@@ -144,11 +136,11 @@ function validateConfig(config) {
                 throw new Error(`'${hookName}[${index}].command' is mandatory and must be a string.`);
             }
             // description (optional) - no checks besides type if present
-            if (item.hasOwnProperty("description") && typeof item.description !== "string") {
+            if (Object.prototype.hasOwnProperty.call(item, "description") && typeof item.description !== "string") {
                 throw new Error(`'${hookName}[${index}].description' must be a string if provided.`);
             }
             // onfail (optional)
-            if (item.hasOwnProperty("onfail")) {
+            if (Object.prototype.hasOwnProperty.call(item, "onfail")) {
                 const val = item.onfail;
                 if (val !== true && (typeof val !== "object" || val === null)) {
                     throw new Error(
@@ -159,34 +151,19 @@ function validateConfig(config) {
                 }
                 if (typeof val === "object") {
                     // If there's an object, check optional fields
-                    if (val.hasOwnProperty("retry_every")) {
-                        // Expect something like "milliseconds, 60000"
-                        // If not in that format, we can throw
-                        if (typeof val.retry_every !== "string") {
+                    if (Object.prototype.hasOwnProperty.call(val, "retry_every")) {
+                        if (typeof val.retry_every !== "number") {
                             throw new Error(
-                                `'${hookName}[${index}].onfail.retry_every' must be a string in format "units, number".`
+                                `'${hookName}[${index}].onfail.retry_every' must be a number (milliseconds), e.g. 60000.`
                             );
                         }
-                        const parts = val.retry_every.split(",");
-                        if (parts.length !== 2) {
+                        if (val.retry_every < 1000 || val.retry_every > 1800000) {
                             throw new Error(
-                                `'${hookName}[${index}].onfail.retry_every' must be in format "something, number".`
-                            );
-                        }
-                        // Trim second part and check range
-                        const maybeNum = parseInt(parts[1].trim(), 10);
-                        if (isNaN(maybeNum)) {
-                            throw new Error(
-                                `'${hookName}[${index}].onfail.retry_every' second part must be a valid integer.`
-                            );
-                        }
-                        if (maybeNum < 1000 || maybeNum > 1800000) {
-                            throw new Error(
-                                `'${hookName}[${index}].onfail.retry_every' numeric value must be between 1000 and 1800000. Got ${maybeNum}.`
+                                `'${hookName}[${index}].onfail.retry_every' must be in range [1000, 1800000]. Got ${val.retry_every}.`
                             );
                         }
                     }
-                    if (val.hasOwnProperty("retry_num")) {
+                    if (Object.prototype.hasOwnProperty.call(val, "retry_num")) {
                         if (
                             typeof val.retry_num !== "number" ||
                             val.retry_num < 1 ||
@@ -235,19 +212,19 @@ function validateConfig(config) {
     }
 
     // ok: 0.01-0.45
-    if (!intervals.hasOwnProperty("ok")) {
+    if (!Object.prototype.hasOwnProperty.call(intervals, "ok")) {
         throw new Error("Missing 'intervals.ok'.");
     }
     checkRange("ok", intervals.ok, 0.01, 0.45);
 
     // error: 0.01-0.3
-    if (!intervals.hasOwnProperty("error")) {
+    if (!Object.prototype.hasOwnProperty.call(intervals, "error")) {
         throw new Error("Missing 'intervals.error'.");
     }
     checkRange("error", intervals.error, 0.01, 0.3);
 
     // default: from 0 up (no upper bound given explicitly)
-    if (!intervals.hasOwnProperty("default")) {
+    if (!Object.prototype.hasOwnProperty.call(intervals, "default")) {
         throw new Error("Missing 'intervals.default'.");
     }
     if (typeof intervals.default !== "number" || intervals.default < 0) {
@@ -255,7 +232,7 @@ function validateConfig(config) {
     }
 
     // buffer: 0.05-0.8
-    if (!intervals.hasOwnProperty("buffer")) {
+    if (!Object.prototype.hasOwnProperty.call(intervals, "buffer")) {
         throw new Error("Missing 'intervals.buffer'.");
     }
     checkRange("buffer", intervals.buffer, 0.05, 0.8);
@@ -266,4 +243,4 @@ function validateConfig(config) {
     return true;
 }
 
-module.exports = { validateConfig };
+module.exports = validateConfig;
